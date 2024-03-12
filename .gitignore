@@ -1,0 +1,21 @@
+# 忽略以下文件
+*.tmp
+*.log
+*.csv
+*.pyc
+*.py0
+*.env
+*.venv
+
+
+# 忽略以下文件夹
+logs/
+.idea/
+venv/
+env.bak/
+.tox/
+.pytest_cache/
+.eggs/
+**/__pycache__/
+**/.vscode/
+**/.ipynb_checkpoints/
