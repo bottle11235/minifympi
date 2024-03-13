@@ -57,14 +57,6 @@ class MinifyMPIBase:
         return self.comm.rank == 0
     
     @property
-    def is_root(self):
-        return self.comm.rank == 0
-    
-    @property
-    def is_non_root(self):
-        return self.comm.rank != 0
-    
-    @property
     def ROOT(self):
         return 0
 
@@ -117,38 +109,13 @@ class MinifyMPI(MinifyMPIBase):
                 self.comm.Disconnect()
                 exit()
             else:
-                # getattr(self, resp['comm_type'])._run(resp=resp)
-                getattr(self, resp['comm_type']).__non_root__(resp=resp)
+                getattr(self, resp['comm_type'])._sub(resp=resp)
 
 
 class MinifyMPINB(MinifyMPIBase):    
-    #FIXME 主进程数据处理和exec函数
-    #- 主进程读写数据到子进程
-    #  目前，对于以下代码：
-    #  mmp.Scatter['a'] = data
-    #  主进程会保留0号进程的数据，这对于大数据运算来说，会带来额外的内存开销。
-    #  对于exec函数也是如此。
-    #- 并行函数的相互通信
-    #  并行函数只在子进程运行，子进程和主进程不在一个进程组，他们的通信是不互通的。
-    #  因此，在进行并行计算时，将comm设置为子进程组的通信子。
     @property
     def is_main(self):
         return self.comm.Get_parent() == MPI.COMM_NULL
-
-    @property
-    def is_root(self):
-        if self.is_main:
-            return False
-        else:
-            return self.comm.rank == 0
-    
-    @property
-    def is_non_root(self):
-        if self.is_main:
-            return False
-        else:
-            return self.comm.rank != 0
-    
 
     @property
     def ROOT(self):
@@ -169,7 +136,7 @@ class MinifyMPINB(MinifyMPIBase):
             'mmp.start_comm()',
         ]
         code = '\n'.join(code)
-        fpath = '/mnt/d/Python/minifympi/tmp__non_root__procss.py'
+        fpath = '/mnt/d/Python/minifympi/tmp_subprocss.py'
         with open(fpath, 'w') as f:
             f.write(code)
 
@@ -185,25 +152,18 @@ class MinifyMPINB(MinifyMPIBase):
                 self.comm.Disconnect()
                 exit()
             else:
-                getattr(self, resp['comm_type']).__non_root__(resp=resp)
+                getattr(self, resp['comm_type'])._sub(resp=resp)
 
 
 class MPICommBase:
     def __init__(self, mmp=None, ) -> None:
         self.mmp = mmp
-        
+
     @property
     def is_main(self):
         return self.mmp.is_main
     
-    @property
-    def is_root(self):
-        return self.mmp.is_root
-    
-    @property
-    def is_non_root(self):
-        return self.mmp.is_non_root
-    
+
     @property
     def comm(self):
         return self.mmp.comm
@@ -227,7 +187,6 @@ class MPICommBase:
     def exit(self):
         self.comm.bcast({'comm_type': 'exit'}, root=self.ROOT)
 
-
     def generate_resp(self, key, value, storage='gs'):
         resp = {
             'comm_type': self.__class__.__name__[3:],
@@ -238,35 +197,19 @@ class MPICommBase:
             'storage': storage,
         }
         return resp
-    
-    def __run__(self, resp=None, data=None, *args: Any, **kwds: Any) -> Any:
-        if self.is_main:
-            self.__main__(resp, data)
-        if self.is_root:
-            self.__root__(resp, data)
-        if self.is_non_root:
-            self.__non_root__(resp, data)
 
-
-    def __main__(self, resp, data=None, **kwargs):
-        pass
-
-    def __root__(self, resp, data=None, **kwargs):
-        self.__non_root__(resp, data, **kwargs)
-
-    def __non_root__(self, resp, data=None, **kwargs):
-        pass
 
 @MinifyMPI.register_comm_cls
 class MPIexec(MPICommBase):
     def __call__(self, code, *args: Any, **kwargs: Any) -> Any:
         resp = {'comm_type': 'exec', 'code': code}
-        self.__run__(resp)
+        self._main(resp)
 
-    def __main__(self, resp, *args, **kwargs):
+    def _main(self, resp):
         self.comm.bcast(resp, root=self.ROOT)
+        self.exec(resp)
 
-    def __non_root__(self, resp, *args, **kwargs):
+    def _sub(self, resp):
         self.exec(resp)
 
 
@@ -300,61 +243,62 @@ class MPICommSetItem(MPICommBase):
     def __call__(self, storage='gs', **kwargs: Any) -> None:
         for key, value in kwargs.items():
             resp = self.generate_resp(key, value, storage)
-            # self.__main__(resp, value)
-            self.__run__(resp, value)
+            self._main(resp, value)
 
 
 @MinifyMPI.register_comm_cls
 class MPIbcast(MPICommSetItem):
-    def __main__(self, resp=None, data=None, **kwargs):
+    def _main(self, resp=None, data=None, **kwargs):
         resp['data'] = data
         self.comm.bcast(resp, root=self.ROOT)
         #FIXME - notebook模式，主进程不需要写入数据
         # 在mpirun模式下，无论是主进程还是次进程，都要写入数据，但是
         # notebook模式下，主进程不需要写入数据。
-        # self.gs[resp['name']] =  data
+        self.gs[resp['name']] =  data
 
 
-    def __non_root__(self, resp=None, data=None, **kwargs):
+    def _sub(self, resp=None, **kwargs):
         getattr(self, resp['storage'])[resp['name']] = resp['data']
 
 
 @MinifyMPI.register_comm_cls
 class MPIBcast(MPICommSetItem):
-    def __main__(self, resp, data, **kwargs):
+    def _main(self, resp, data, **kwargs):
         self.comm.bcast(resp, root=self.ROOT)
-
-    
-    # def __root__(self, resp, data=None, **kwargs):
-    #     self.comm.Bcast(data, root=self.ROOT)
-    #     getattr(self, resp['storage'])[resp['name']] = data
+        self.comm.Bcast(data, root=self.ROOT)
+        self.gs[resp['name']] = data
 
 
-
-    def __non_root__(self, resp=None, data=None, **kwargs):
-        data = np.zeros(resp['shape'], resp['dtype']) if data is None else data
+    def _sub(self, resp=None):
+        data = np.zeros(resp['shape'], resp['dtype'])
         self.comm.Bcast(data, root=self.ROOT)
         getattr(self, resp['storage'])[resp['name']] = data
 
 
 @MinifyMPI.register_comm_cls
 class MPIscatter(MPICommSetItem):
-    def __main__(self, resp, data):
+    def _main(self, resp, data):
         self.comm.bcast(resp, root=self.ROOT)
-
-    def __non_root__(self, resp, data=None):
         self.gs[resp['name']] =  self.comm.scatter(data, root=self.ROOT)
+
+    def _sub(self, resp):
+        self.gs[resp['name']] =  self.comm.scatter(None, root=self.ROOT)
 
 
 @MinifyMPI.register_comm_cls
 class MPIScatter(MPICommSetItem):
-    def __main__(self, resp, data):
+    def _main(self, resp, data):
         self.comm.bcast(resp, root=self.ROOT)
-
-    def __non_root__(self, resp, data=None):
-        data_recv = np.zeros((resp['shape'][0]//self.mmp.n_procs,)+resp['shape'][1:], resp['dtype'])
+        shape = (resp['shape'][0]//self.mmp.n_procs,) + resp['shape'][1:]
+        data_recv = np.zeros(shape, resp['dtype'])
         self.comm.Scatter(data, data_recv, root=self.ROOT)
         self.gs[resp['name']] =  data_recv
+
+
+    def _sub(self, resp):
+        data = np.zeros((resp['shape'][0]//self.mmp.n_procs,)+resp['shape'][1:], resp['dtype'])
+        self.comm.Scatter(None, data, root=self.ROOT)
+        self.gs[resp['name']] =  data
 
 
 @MinifyMPI.register_comm_cls
@@ -371,24 +315,31 @@ class MPIScatterv(MPICommSetItem):
     #FIXME - [WARNING] yaksa: 1 leaked handle pool objects
     #   目前会出现[WARNING] yaksa: 1 leaked handle pool objects提示，要找出这个问题
     #   并解决。
+    def _main(self, resp, data, count=None, dspl=None):
+        if count is None and dspl is None:
+            task_count, count, displ = self.assign_tasks(data)
+        
+        resp['task_count'] = task_count
+        self.comm.bcast(resp, root=self.ROOT)
+        shape = list(data.shape)
+        shape[0] = task_count[0]
+        data_recv = np.zeros(shape, data.dtype)
+        self.comm.Scatterv([data, count, displ, from_numpy_dtype(data.dtype)],
+                            data_recv, root=self.ROOT)
+        self.gs[resp['name']] = data_recv
+
+
     def __call__(self, storage='gs', count=None, displ=None, **kwargs: Any) -> None:
         for key, value in kwargs.items():
             resp = self.generate_resp(key, value, storage)
-            self.__run__(resp, value, count=count, displ=displ)
+            self._main(resp, value, count, displ)
 
 
-    def __main__(self, resp, data, count=None, dspl=None):
-        if count is None and dspl is None:
-            task_count, count, displ = self.assign_tasks(data)
-        resp['task_count'] = task_count
-        self.comm.bcast(resp, root=self.ROOT)
-
-
-    def __non_root__(self, resp, data=None):
+    def _sub(self, resp):
         shape = list(resp['shape'])
         shape[0] = resp['task_count'][self.mmp.rank]
         data_recv = np.zeros(shape, resp['dtype'])
-        self.comm.Scatterv(data, data_recv, root=self.ROOT)
+        self.comm.Scatterv(None, data_recv, root=self.ROOT)
         self.gs[resp['name']] = data_recv
 
 
@@ -418,44 +369,27 @@ class MPICommGetItem(MPICommBase):
     def __call__(self, *args: Any, **kwargs: Any) -> None:
         returns = []
         for key in args:
-            resp = self.generate_resp(key, None)
-            data = self.__run__(resp)
+            resp = self.generate_resp(key, self.gs[key])
+            data = self._main(resp)
             returns.append(data)
         return returns[0] if len(returns) == 1 else returns
 
 
-    def __run__(self, resp=None, *args: Any, **kwds: Any) -> Any:
-        if self.is_main:
-            self.__main__(resp)
-        if self.is_root:
-            self.__root__(resp)
-        if self.is_non_root:
-            self.__non_root__(resp)
-
-
-    def __main__(self, resp, data=None, **kwargs):
-        pass
-
-    def __root__(self, resp, data=None, **kwargs):
-        self.__non_root__(resp, data, **kwargs)
-
-    def __non_root__(self, resp, data=None, **kwargs):
-        pass
-
 @MinifyMPI.register_comm_cls
 class MPIgather(MPICommGetItem):
-    def __main__(self, resp=None):
+    def _main(self, resp=None):
         self.comm.bcast(resp, root=self.ROOT)
-        data = self.comm.gather(self.gs[resp['name']], root=self.ROOT)
-
-    def __non_root__(self, resp=None):
         data = self.comm.gather(self.gs[resp['name']], root=self.ROOT)
         return data
 
 
+    def _sub(self, resp=None):
+        self.comm.gather(self.gs[resp['name']], root=self.ROOT)
+
+
 @MinifyMPI.register_comm_cls
 class MPIGather(MPICommGetItem):
-    def __main__(self, resp):
+    def _main(self, resp):
         data0, shape = self.gs[resp['name']], resp['shape']
         if not isinstance(data0, np.ndarray):
             raise TypeError
@@ -479,7 +413,7 @@ class MPIGather(MPICommGetItem):
         return data
 
 
-    def __non_root__(self, resp):
+    def _sub(self, resp):
         data = self.gs[resp['name']]
         self.comm.gather(self.generate_resp(resp['name'], data), root=self.ROOT)
         resp = self.comm.bcast(None, root=self.ROOT)
