@@ -574,7 +574,7 @@ class MPIbcast(MPICommBase):
         else:
             resp = kwargs['resp']
             getattr(self, resp['storage'])[resp['name']] = resp['data']
-            # self.log('__call__', self.ls)
+
 
 @MinifyMPI.register_comm_cls
 class MPIBcast(MPICommBase):

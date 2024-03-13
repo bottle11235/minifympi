@@ -19,9 +19,10 @@ def monte_carlo_pi(data):
             points_inside_circle += 1
     
     pi_estimate = 4 * points_inside_circle 
+    print(pi_estimate)
     return pi_estimate
 
-@parallel(4,2000)
+@parallel(4, 2000)
 def run(
     data1:"S", *args, **kwargs
 )-> 'g':

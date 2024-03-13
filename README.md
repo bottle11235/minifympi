@@ -165,11 +165,13 @@ assert res2 == [c]*n_procs
 - 介绍MinifyMPI类的使用，一种简单的通信方式，还有它的限制，目前只能实现阻塞通信，非阻塞看情况开发。
 - 将求和的例子改为1000个向量和1000种不同的旋转矩阵相乘的例子。
     这样的例子可以更好地表现并行带来的优势，也可以说明n_tasks和数据长度的关系。
-- MinifyMPI类提供他自己的rank和send、recv等通信函数。
-    因为MinifyMPI是通过`spawn`来动态生成进程的，所有rank的表现和静态的并不一样。我们
-    希望提供MinifyMPI自己的通信函数，来让不熟悉多进程的用户可以获得像使用静态多进程那样的体验。
-    也就是0号进程是主（根）进程，其他进程是子进程。
 - 对读写文件的支持。目前还不支持。
+- 查找函数依赖，包括装饰器的
+- 优化MinifyMPI。将MinifyMPI拆分成两个类，一个是在notebook里用，一个是mpirun用。另外修改MinifyMPI的一些通信函数，将Scatter改为原来的Scatter，并提供Scatterv。
+- 写unittest，检查是否有bug，包括压力测试，检查大数据情况下，是否有bug 
+- 提供mpirun的parallel
+
+
 
 对于并行函数，我们有以下方案：
 ```python

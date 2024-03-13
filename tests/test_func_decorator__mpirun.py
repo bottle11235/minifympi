@@ -15,6 +15,8 @@ mmp.start_comm({'mmp': mmp})
 @mmp.parallel
 def test(a:'S', b:'s', c=None, d:'S'=None, *args, **kwargs)->'G,g,g':
     print(a[0, 0, 0, :3])
+    print(mmp.rank, mmp.comm.rank)
+
     return a, b, d
 
 a = np.random.randint(0, 1000, (n_tasks, 1024, 1024, 512//8))

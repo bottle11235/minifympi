@@ -18,8 +18,16 @@ comm.Scatter(None, a_recv, root=0)
 comm.Scatter(None, d_recv, root=0)
 # b = comm.scatter(None, root=0)
 # comm.Bcast(c, root=0)
+
 print(f'sub{rank}', a_recv[0, 0, 0, 0])
 
+if rank == 0:
+    data = comm.recv(source=0)
+    print(f'sub{rank}', data)
+    print('send data to main')
+    comm.send([4, 5, 6], dest=0)
+
+# if rank == 0
 # def test(a:'S', b:'s', c=None, d:'S'=None, *args, **kwargs)->'G,g,g':
 #     print(a[0, 0, 0, :3])
 #     return a, b, d

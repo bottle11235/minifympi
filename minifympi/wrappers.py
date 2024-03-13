@@ -96,6 +96,7 @@ class Parallel:
             data = getattr(self.mmp, comm_type)[name]
             all_returns.append(data)
         return all_returns
+        # return all_returns[0] if len(all_returns) == 1 else tuple(all_returns)
 
 
     def __call__(self, n_procs=None, n_tasks=None):
