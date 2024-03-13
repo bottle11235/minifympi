@@ -26,19 +26,15 @@ mmp.log('a', a)
 data = np.arange(mmp.n_procs*3).reshape(mmp.n_procs, -1)
 mmp.Scatter['a'] = data
 a = mmp.Gather['a']
-mmp.log('a', a)
+mmp.log('Scatter a', a)
 
 
-code = 'mmp.log("exec", mmp.gs["b"])'
+code = 'mmp.log("exec", mmp.gs["a"])'
 mmp.exec(code)
-
-# mmp.log('tasks_count', mmp.tasks_count)
-mmp.log("mmp.gs['a']", mmp.gs['a'])
 
 
 # data = np.random.randint(0, 100, (15, 3))
 data = np.arange(36).reshape(4, -1)
-
 # mmp.Scatterv['a'] = data
 mmp.Scatterv(a=data)
 code = 'mmp.log("exec", mmp.gs["a"])'
