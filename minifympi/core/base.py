@@ -100,6 +100,14 @@ class MinifyMPIBase:
             ' '.join([str(msg) for msg in msgs]),
         )
 
+    
+    def generate_script(self, func):
+        ''''''
+        code_str = '#'
+        return code_str
+
+    def parallel(self, func):
+        pass
 
 class MinifyMPI(MinifyMPIBase):    
     def start_comm(self, gs=None):
@@ -112,6 +120,7 @@ class MinifyMPI(MinifyMPIBase):
         while True:
             resp = self.comm.bcast(None, root=self.ROOT)
             if resp['comm_type'] == 'exit':
+                #TODO 根据具体环境，检查是否运行Disconnect函数
                 self.comm.Disconnect()
                 exit()
             else:
@@ -262,9 +271,6 @@ class MPIScatterv(MPICommSetItem):
     # - 数据类型检查
     #   mpi4py并非所有的numpy数据类型都支持，例如np.float16就不支持，可以考虑进行数据
     #   类型的检测
-    # - 提供axis参数
-    #   axis只接受-1和0两个参数，-1表示按照Scatterv的默认行为进行分发，axis为0表示按照
-    #   第一个轴进行数据分发。暂不支持更多的axis设定。
     # - 可以指定count、displ这些参数。
     #   Scatterv可以指定count（数量）、displ（偏移），我们应当支持接收这些参数。
     #FIXME - [WARNING] yaksa: 1 leaked handle pool objects
@@ -311,7 +317,6 @@ class MPIScatterv(MPICommSetItem):
         displ = np.zeros_like(count)
         displ[1:] = np.cumsum(count)[:-1]
         return task_count, count, displ
-
 
 
 class MPICommGetItem(MPICommBase):
@@ -371,7 +376,6 @@ class MPIGather(MPICommGetItem):
             resp = self.generate_resp(resp['name'], senddata)
             resp['status'] = 'check_data'
             self.comm.gather(resp, root=self.ROOT)
-
         elif resp['status'] == 'continue':
             recvdata = np.zeros(resp['shape'], resp['dtype']) if self.is_main else None
             self.comm.Gather(self.gs[resp['name']], recvdata, root=self.ROOT)

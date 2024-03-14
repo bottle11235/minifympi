@@ -259,7 +259,9 @@ class MinifyMPI:
                 if value.__module__ == '__main__':
                     code_func.append(inspect.getsource(value))
                 else:
-                    code_import.append(f'from {value.__module__} import {key}')
+                    # f'import {key}' if key == value.__name__ else f'import {value.__name__} as {key}'
+                    print(key == value.__name__.split('.')[-1])
+                    code_import.append(f'from {value.__module__} import {key}' if key == value.__name__.split('.')[-1] else f'import {value.__module__} as {key}')
             elif key != 'mmp':
                 warnings.warn(f'`{key}` is a global variable, which has the risk of being undefined.', UserWarning)
         
