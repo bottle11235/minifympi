@@ -408,9 +408,8 @@ class MPIFunction:
                     raise KeyError(f'`key` accepts only `str` and `tuple`, '
                        'but `{type(key).__name__}` was given.')
         self.res_name = key
-
         return self.record
-        
+
 
     def record(self, *args, **kwargs):
         '''record'''
