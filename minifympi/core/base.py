@@ -16,6 +16,7 @@ import traceback
 from rich.syntax import Syntax
 from rich.console import Console
 from mpi4py.util.dtlib import from_numpy_dtype
+import builtins
 
 # from rich.theme import Theme
 import uuid
@@ -126,6 +127,71 @@ class MinifyMPI(MinifyMPIBase):
             else:
                 getattr(self, resp['comm_type']).__comm__(resp=resp)
 
+    def extract_decorate_names(self,source_code):
+        decorator_pattern = re.compile(r'@(\w+)')
+        decorators = decorator_pattern.findall(source_code.split('def')[0])
+        return decorators
+
+    def get_dependent_code(self, func, seen=None, codes=None, modules=None):
+        if seen is None:
+            seen = set()
+        if codes is None:
+            codes = []
+        if modules is None:
+            modules = set()
+        
+        if func in seen:
+            return codes, modules
+        seen.add(func)
+        if hasattr(func, '__wrapped__'):
+            source_code = inspect.getsource(func.__wrapped__)
+            decorator_names= self.extract_decorator_names(source_code)
+            for decorator_name in decorator_names:
+                if globals()[decorator_name].__module__ == "__main__" and globals()[decorator_name] not in seen:
+                    self.get_dependent_code(globals()[decorator_name], seen, codes, modules)
+                else:
+                    modules.add("from " + globals()[decorator_name].__module__ + " import " + decorator_name)
+            while hasattr(func, '__wrapped__'):
+                func = func.__wrapped__
+        if func.__module__ != "__main__":
+            modules.add("from " + func.__module__ + " import " + func.__name__)
+        else:
+            try:
+                source = inspect.getsource(func)
+                codes.append(source)
+            except Exception as e:
+                print(f"Error getting source of {func.__name__}: {e}")
+
+        module = inspect.getmodule(func)  
+        if not module:
+            pass
+        else:
+            func_globals = func.__globals__
+            
+            for name in func.__code__.co_names:
+                if name in dir(builtins):
+                    continue
+
+                if name in func_globals and not name.startswith("__"):
+                    obj = func_globals[name]
+                    if isinstance(obj, types.ModuleType):
+                        modules.add(f"import {obj.__name__} as {name}" if obj.__name__ != name else f"import {obj.__name__}")
+                    elif hasattr(obj, '__module__'):
+                        if obj.__module__ != "__main__":
+                            modules.add(f"from {obj.__module__} import {name}")
+
+        for name in func.__code__.co_names:
+            try:
+                if hasattr(globals()[name], '__wrapped__'):
+                    self.get_dependent_code(globals()[name], seen, codes, modules)
+            except:
+                pass
+
+            obj =  globals().get(name, None) 
+            if inspect.isfunction(obj) and obj not in seen:
+                self.get_dependent_code(obj, seen, codes, modules)
+        
+        return codes, modules
 
 
 class MPICommBase:
