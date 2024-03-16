@@ -16,11 +16,23 @@ import traceback
 from rich.syntax import Syntax
 from rich.console import Console
 from mpi4py.util.dtlib import from_numpy_dtype
-
+from ..utils.code import get_source_with_requires, get_decorators
 # from rich.theme import Theme
+from itertools import chain
+from functools import reduce
+from .decorators import Parallel
 import uuid
 
-
+#TODO
+#- notebook模式报错处理
+#  notebook模式下，调用mmp.Gather报错的话不会直接结束多进程，而是抛出报错，
+#  多进程依然再等待消息。这样用户就不需要重复开启多进程了。
+#- start_comm/close_comm检查是否已经启动/结束
+#  如果已经启动/结束，就不会在采取任何行动，而是打印一个warning
+#- notebook模式应当作为开发模式
+#  我们应该把notebook当做是快捷开发平台，调用mmp.scatter['a'] = data的时候，将
+#  data发送到root进程，然后在root进程执行mmp.scatter['a'] = data。这样可以保证
+#  mpi的表现与mpirun完全一致的，缺点是内存开销将会是现在的2倍。
 
 class MMPOptions:
     def __init__(self) -> types.NoneType:
@@ -100,14 +112,74 @@ class MinifyMPIBase:
             ' '.join([str(msg) for msg in msgs]),
         )
 
-    
-    def generate_script(self, func):
-        ''''''
-        code_str = '#'
-        return code_str
 
-    def parallel(self, func):
-        pass
+    def parallel(self, func, gs=None, ignores=None, requires=None):
+        #NOTE notebook模式下，jit装饰的函数缺少__globals__属性，.py文件则
+        #     不会缺少。因此，我们需要提供一个变量来解释gs参数。
+
+        # MinifyMPI 类将会被忽略，这将是一个全局通用的变量
+        gs = {} if gs is None else gs        
+        gs.update(getattr(func, '__globals__', {}))
+        ignores = [] if ignores is None else ignores
+        alias = [key for key, value in gs.items() if value is self]
+        ignores.extend(alias)
+
+
+        # 为了避免递归调用，我们将MinifyMPI.parallel装饰器注释掉
+        code = get_source_with_requires(func, gs, ignores, requires)
+        decs = get_decorators(func)
+        for dec_code, dec in decs.items():
+            if dec in alias:
+                code = re.sub(f'(\s*)(@{dec_code})', r'\1#\2', code)
+        self.log('parallel', '\n'+code)
+        self.log('parallel', ignores)
+
+
+        self.exec(code)
+        mpi_func = MPIFunction(self, func)
+        setattr(self, func.__code__.co_name, mpi_func)
+        update_wrapper(mpi_func, func)
+        return func
+    
+
+    def __setitem__(self, keys, values):
+        if isinstance(keys, str):
+            keys = (keys, )
+
+        if isinstance(values, MPIFunction):
+            for key in keys:
+                self.gs[key] = None
+        
+            arguments = values.send_arguments()
+            code_args = ', '.join((chain(*arguments.values())))
+            code_res = ', '.join([f'mmp.gs["{key}"]' for key in keys])
+            code = f'{code_res} = {values.func.__code__.co_name}({code_args})'
+            self.exec(code)
+
+
+        else:
+            '''bcast'''
+
+
+    def __getitem__(self, keys):
+        '''
+        获取进程中的变量。这是一种标记符号，并不会放回进程里的数据。
+        仅在并行函数内作为参数使用，以及删除进程内数据时使用。
+        '''
+        _keys = keys
+        if isinstance(keys, str):
+            keys = (keys,)
+        elif not isinstance(keys, (list, tuple)):
+            raise KeyError(keys)
+        for key in keys:
+            if key not in self.gs:
+                raise KeyError(f'key `{key}` not Found.')
+        vars = tuple(MPIVar(self, key) for key in keys)            
+        if isinstance(_keys, str):
+            return vars[0]
+        else:
+            return vars
+
 
 class MinifyMPI(MinifyMPIBase):    
     def start_comm(self, gs=None):
@@ -126,6 +198,55 @@ class MinifyMPI(MinifyMPIBase):
             else:
                 getattr(self, resp['comm_type']).__comm__(resp=resp)
 
+
+class MPIFunction:
+    def __init__(self, mmp, func):
+        self.mmp = mmp
+        self.func = func
+        self.bound = {}
+
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        sig = inspect.signature(self.func)
+        bound = sig.bind(*args, **kwargs)
+        self.bound['pargs'] = bound.arguments
+        self.bound['args'] = {f'{i}': item for i, item in enumerate(bound.arguments.pop('args', {}))}
+        self.bound['kwargs'] = bound.arguments.pop('kwargs', {})
+        return self
+
+
+    def send_arguments(self):
+        arguments = {}
+        for arg_type, dct in self.bound.items():
+            arguments[arg_type] = []
+            for key, value in dct.items():
+                storage = 'gs' if isinstance(value, MPIVar) else 'ls'
+                prefix = f'{key}=' if arg_type=='kwargs' else ''
+                if isinstance(value, np.ndarray):
+                    self.mmp.Bcast(storage='ls', **{key: value})
+                elif not isinstance(value, MPIVar):
+                    self.mmp.bcast(storage='ls', **{key: value})
+                arguments[arg_type].append(f'{prefix}mmp.{storage}["{key}"]')
+        return arguments
+
+
+class MPIVar:
+    '''
+    TODO - MPIVar 的展示
+    我们最好再Mpi类内维护一个metadata的字典，用于记录进程内变量的信息，
+    通过MPIVar来标记变量时，就会展示相关的信息，例如类型，大小和传输类型
+    等信息。
+    '''
+    def __init__(self, mmp, key) -> None:
+        self.mmp = mmp
+        self.key = key
+    
+
+    def __str__(self) -> str:
+        return f"<<MPIVar> name='{self.key}'>"
+    
+    def __repr__(self) -> str:
+        return self.__str__()
 
 
 class MPICommBase:
@@ -239,30 +360,30 @@ class MPICommSetItem(MPICommBase):
 class MPIbcast(MPICommSetItem):
     def __comm__(self, resp=None, senddata=None, **kwargs):
         recvdata = self.comm.bcast(senddata, root=self.ROOT)
-        self.__set_data__(resp['name'], recvdata)
+        self.__set_data__(resp['name'], recvdata, resp['storage'])
 
 
 @MinifyMPI.register_comm_cls
 class MPIBcast(MPICommSetItem):
-    def __comm__(self, resp=None, senddata=None):
+    def __comm__(self, resp=None, senddata=None, storage='gs'):
         senddata = np.zeros(resp['shape'], resp['dtype']) if senddata is None else senddata
         self.comm.Bcast(senddata, root=self.ROOT)
-        self.__set_data__(resp['name'], senddata)
+        self.__set_data__(resp['name'], senddata, resp['storage'])
 
 
 @MinifyMPI.register_comm_cls
 class MPIscatter(MPICommSetItem):
-    def __comm__(self, resp=None, senddata=None):
+    def __comm__(self, resp=None, senddata=None, storage='gs'):
         recvdata = self.comm.scatter(senddata, root=self.ROOT)
-        self.__set_data__(resp['name'], recvdata)
+        self.__set_data__(resp['name'], recvdata, resp['storage'])
 
 
 @MinifyMPI.register_comm_cls
 class MPIScatter(MPICommSetItem):
-    def __comm__(self, resp=None, senddata=None):
+    def __comm__(self, resp=None, senddata=None, storage='gs'):
         recvdata = np.zeros((resp['shape'][0]//self.mmp.n_procs,)+resp['shape'][1:], resp['dtype'])
         self.comm.Scatter(senddata, recvdata, root=self.ROOT)
-        self.__set_data__(resp['name'], recvdata)
+        self.__set_data__(resp['name'], recvdata, resp['storage'])
 
 
 @MinifyMPI.register_comm_cls
@@ -273,9 +394,8 @@ class MPIScatterv(MPICommSetItem):
     #   类型的检测
     # - 可以指定count、displ这些参数。
     #   Scatterv可以指定count（数量）、displ（偏移），我们应当支持接收这些参数。
-    #FIXME - [WARNING] yaksa: 1 leaked handle pool objects
-    #   目前会出现[WARNING] yaksa: 1 leaked handle pool objects提示，要找出这个问题
-    #   并解决。
+
+
 
     def __call__(self, storage='gs', count=None, displ=None, **kwargs: Any) -> None:
         for key, value in kwargs.items():
@@ -286,7 +406,6 @@ class MPIScatterv(MPICommSetItem):
     def __main__(self, resp, data, count=None, dspl=None):
         if count is None and dspl is None:
             task_count, count, displ = self.assign_tasks(data)
-        
         resp['task_count'] = task_count
         resp['count'] = count
         resp['displ'] = displ
@@ -294,16 +413,19 @@ class MPIScatterv(MPICommSetItem):
 
 
     def __comm__(self, resp, senddata=None):
+        pass
         shape = list(resp['shape'])
         shape[0] = resp['task_count'][self.mmp.rank]
         count = resp['count']
         displ = resp['displ']
+        #NOTE - [WARNING] yaksa: 1 leaked handle pool objects 
+        #  这个提示是由from_numpy_dtype抛出的，看起来不会带来任何错误。
+        #LINK - https://github.com/firedrakeproject/firedrake/issues/2672
         datatype = from_numpy_dtype(resp['dtype'])
         recvdata = np.zeros(shape, resp['dtype'])
-        
         self.comm.Scatterv([senddata, count, displ, datatype], recvdata, root=self.ROOT)
-        # self.log('Scatterv resp', resp)
-        self.__set_data__(resp['name'], recvdata)
+        self.__set_data__(resp['name'], recvdata, resp['storage'])
+        self.comm.Barrier()
 
 
     def assign_tasks(self, data):
@@ -328,10 +450,10 @@ class MPICommGetItem(MPICommBase):
         return self.__call__(*key)
 
 
-    def __call__(self, *args: Any, **kwargs: Any) -> None:
+    def __call__(self, *args: Any, storage='gs', **kwargs: Any) -> None:
         returns = []
         for key in args:
-            resp = self.generate_resp(key, None)
+            resp = self.generate_resp(key, None, storage)
             self.__main__(resp)
             data = self.__comm__(resp)
             returns.append(data)
@@ -341,7 +463,7 @@ class MPICommGetItem(MPICommBase):
 @MinifyMPI.register_comm_cls
 class MPIgather(MPICommGetItem):
     def __comm__(self, resp=None):
-        return self.comm.gather(self.gs[resp['name']], root=self.ROOT)
+        return self.comm.gather(getattr(self, resp['storage'])[resp['name']], root=self.ROOT)
 
 
 @MinifyMPI.register_comm_cls
@@ -352,10 +474,11 @@ class MPIGather(MPICommGetItem):
         self.comm.bcast(resp, root=self.ROOT)
         resps = self.comm.gather(resp, root=self.ROOT)
         if resps[0]['type'] == 'NoneType':
-            resp.update(self.generate_resp(resp['name'], self.gs[resp['name']]))
+            resp.update(self.generate_resp(resp['name'], getattr(self, resp['storage'])[resp['name']], resp['storage']))
             resps[0] = resp
         else:
             resp.update(resps[0])
+
 
         # resps包含了所有的metadata，如果metadata不是完全一样，
         # 报错并通知次进程停止Gather
@@ -372,13 +495,54 @@ class MPIGather(MPICommGetItem):
 
     def __comm__(self, resp):
         if resp['status'] == 'check_data':
-            senddata = self.gs[resp['name']]
-            resp = self.generate_resp(resp['name'], senddata)
+            senddata = getattr(self, resp['storage'])[resp['name']]
+            resp = self.generate_resp(resp['name'], senddata, resp['storage'])
             resp['status'] = 'check_data'
             self.comm.gather(resp, root=self.ROOT)
         elif resp['status'] == 'continue':
             recvdata = np.zeros(resp['shape'], resp['dtype']) if self.is_main else None
-            self.comm.Gather(self.gs[resp['name']], recvdata, root=self.ROOT)
+            self.comm.Gather(getattr(self, resp['storage'])[resp['name']], recvdata, root=self.ROOT)
             return recvdata
 
 
+@MinifyMPI.register_comm_cls
+class MPIGatherv(MPICommGetItem):
+    def __main__(self, resp):
+        resp['status'] = 'check_data'
+        self.comm.bcast(resp, root=self.ROOT)
+        resps = self.comm.gather(resp, root=self.ROOT)
+        if resps[0]['type'] == 'NoneType':
+            resp.update(self.generate_resp(resp['name'], getattr(self, resp['storage'])[resp['name']], resp['storage']))
+            resps[0] = resp
+        else:
+            resp.update(resps[0])
+
+        # 根据元数据，检查数据是否有效
+        if not all([resp['type'] == 'ndarray' for resp in resps]) or\
+           not all([resp['dtype'] == resps[0]['dtype'] for resp in resps]) or\
+           not all([resp['shape'][1:] == resps[0]['shape'][1:] for resp in resps]):
+            self.comm.bcast({'status': 'stop'}, root=self.ROOT)
+            msg = 'Cannot Gatherv data. The metadata is shown below:\n'
+            msg += '\n'.join([f'sub{i}: {meta}' for i, meta in enumerate(resps)])
+            raise ValueError(msg)
+        
+        resp['status'] = 'continue'        
+        resp['count'] = [np.prod(resp['shape']) for resp in resps]
+        resp['shape'] = reduce(lambda x, y: (x[0]+y[0], *x[1:]), 
+                       [resp['shape'] for resp in resps])
+        self.comm.bcast(resp, root=self.ROOT)
+
+
+    def __comm__(self, resp=None, **kwargs):
+        if resp['status'] == 'check_data':
+            senddata = getattr(self, resp['storage'])[resp['name']]
+            resp = self.generate_resp(resp['name'], senddata, resp['storage'])
+            self.comm.gather(resp, root=self.ROOT)
+        
+        elif resp['status'] == 'continue':
+            # self.log('Gatherv resp', resp)
+            recvdata = np.zeros(resp['shape'], resp['dtype']) if self.is_main else None
+            self.comm.Gatherv(getattr(self, resp['storage'])[resp['name']], [recvdata, resp['count']], root=self.ROOT)
+            return recvdata
+        
+parallel = Parallel(MinifyMPI)

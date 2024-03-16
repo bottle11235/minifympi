@@ -1,11 +1,19 @@
 from textwrap import dedent
 import sys
-import ast
+import ast, astor
 import types
 import inspect
 import warnings
 import black
+import re
+import importlib
 
+
+def get_decorators(func):    
+    node = ast.parse(dedent(inspect.getsource(func))).body[0]
+    decs = [astor.to_source(dec).strip() for dec in node.decorator_list]
+    decs = {dec: re.findall('^\w+', dec)[0] for dec in decs}
+    return decs
 
 def find_requires(func, g=None, ignores=None):
     ''' 
@@ -23,10 +31,9 @@ def find_requires(func, g=None, ignores=None):
 
 
 def find_code_requires(func, g, ignores=None):
-    node = ast.parse(dedent(inspect.getsource(func))).body[0]
-    decs = [dec.id if hasattr(dec, 'id') else dec.func.id for dec in node.decorator_list]
+    decs = get_decorators(func)
     requires = [
-        name for name in func.__code__.co_names + tuple(decs)
+        name for name in func.__code__.co_names + tuple(set(decs.values()))
         if name not in ignores \
         and name != func.__code__.co_name \
         and hasattr(sys.modules['__main__'], name)
@@ -66,6 +73,13 @@ def get_source_with_requires(func, gs=None, ignores=None, requires=None, ):
                 item = f'from {value.__module__} import {value.__name__}' 
                 item += f' as {key}' if key != value.__name__ else ''
                 code_import.append(item)
+        elif hasattr(value, '__module__'):
+            module = importlib.import_module(value.__module__)
+            if hasattr(module, key):
+                code_import.append(f'from {value.__module__} import {key}')
+            else:
+                msg = f'`{key}` is a global variable which may cause unknown errors.'
+                warnings.warn(msg, UserWarning)
         else:
             msg = f'`{key}` is a global variable which may cause unknown errors.'
             warnings.warn(msg, UserWarning)
@@ -75,4 +89,17 @@ def get_source_with_requires(func, gs=None, ignores=None, requires=None, ):
     return black.format_str(code, mode=black.Mode())
 
 
-__all__ = ['get_source_with_requires']
+__all__ = ['get_source_with_requires', 'get_decorators']
+
+# from numba import jit
+
+# def test1(func):
+#     return func
+
+# # @test1
+# @jit
+# def test2():
+#     print(2)
+
+
+# print(get_source_with_requires(test2, globals()))

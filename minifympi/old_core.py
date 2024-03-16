@@ -327,25 +327,24 @@ class MinifyMPI:
                 os.remove(fpath)
 
 
-    def __getitem__(self, key):
+    def __getitem__(self, keys):
         '''
         获取进程中的变量。这是一种标记符号，并不会放回进程里的数据。
         仅在并行函数内作为参数使用，以及删除进程内数据时使用。
-
-        TODO - 对于获取进程内多个变量的支持
-        我们也许要添加同时获取多个变量的支持，实现起来也不困难，而且也
-        符合python的使用习惯。
         '''
-        if isinstance(key, str):
+        _keys = keys
+        if isinstance(keys, str):
+            keys = (keys,)
+        elif not isinstance(keys, (list, tuple)):
+            raise KeyError(keys)
+        for key in keys:
             if key not in self.gs:
                 raise KeyError(f'key `{key}` not Found.')
-        # elif isinstance(key, tuple):
-        #     for item in key:
-        #         if not isinstance(item, str):
-        #             raise TypeError('only support str.')            
-        #         if key not in self.gs:
-        #             raise KeyError(f'key `{key}` not Found.')
-        return MPIVar(self, key)
+        vars = tuple(MPIVar(self, key) for key in keys)            
+        if isinstance(_keys, str):
+            return vars[0]
+        else:
+            return vars
     
 
     def __delitem__(self, key):
@@ -503,6 +502,13 @@ class MPIVar:
     def __init__(self, mmp, key) -> None:
         self.mmp = mmp
         self.key = key
+    
+
+    def __str__(self) -> str:
+        return f"<<MPIVar> name='{self.key}'>"
+    
+    def __repr__(self) -> str:
+        return self.__str__()
 
 
 class MPICommBase:

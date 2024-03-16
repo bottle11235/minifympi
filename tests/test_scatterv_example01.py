@@ -1,5 +1,6 @@
 from mpi4py import MPI
 import numpy as np
+from mpi4py.util.dtlib import from_numpy_dtype
 
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
@@ -45,6 +46,6 @@ comm.Bcast(count, root=0)
 recvbuf = np.zeros(count[rank], float).reshape(-1, 3)
 
 
-comm.Scatterv([sendbuf, count, displ], recvbuf, root=0)
+comm.Scatterv([sendbuf, count, displ, from_numpy_dtype(recvbuf.dtype)], recvbuf, root=0)
 
 print('After Scatterv, process {} has data:'.format(rank), recvbuf)

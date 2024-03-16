@@ -1,4 +1,5 @@
 from .base import MinifyMPIBase
+from .decorators import Parallel
 from mpi4py import MPI
 import sys
 
@@ -50,3 +51,4 @@ class MinifyMPI(MinifyMPIBase):
             else:
                 getattr(self, resp['comm_type']).__comm__(resp=resp)
 
+parallel = Parallel(MinifyMPI)
