@@ -7,6 +7,7 @@ from numba import jit
 n_procs = 4
 
 @parallel(n_procs)
+@jit
 def test(a:'S', b, c:'Sv')->'g':
     # c = np.arange(np.random.randint(1, 4, 1))
     return a+b, b, c

@@ -36,8 +36,13 @@ class Parallel:
         pass
 
     def register_func(self, func, gs=None, ignores=None, requires=None):
-        gs = {} if gs is None else gs        
-        gs.update(getattr(func, '__globals__', {}))
+        gs = {} if gs is None else gs
+        if hasattr(func, '__globals__'):
+            gs.update(getattr(func, '__globals__'))
+        elif hasattr(func, '__wrapped__'):
+            gs.update(func.__wrapped__.__globals__)
+        
+
         alias = [key for key, value in gs.items() if value is self]
         ignores = [] if ignores is None else ignores
         ignores.extend(alias)
