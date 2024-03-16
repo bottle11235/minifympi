@@ -3,8 +3,7 @@ from mpi4py import MPI
 import inspect
 # import re
 import numpy as np
-from minifympi.utils.code import get_source_with_requires, get_decorators
-# from minifympi.core.base import MPIFunction
+from ..utils.code import get_source_with_requires, get_decorators
 from functools import wraps, update_wrapper, reduce
 from itertools import chain
 from textwrap import dedent
@@ -41,7 +40,6 @@ class Parallel:
             gs.update(getattr(func, '__globals__'))
         elif hasattr(func, '__wrapped__'):
             gs.update(func.__wrapped__.__globals__)
-        
 
         alias = [key for key, value in gs.items() if value is self]
         ignores = [] if ignores is None else ignores
@@ -116,6 +114,7 @@ class Parallel:
     
     def __call__(self, n_procs=None, gs=None, ignores=None, requires=None):
         def decorator(func):
+            @wraps(func)
             def wrapper(*args, **kwargs):
                 self.mmp.n_procs = n_procs
                 self.mmp.start_comm()

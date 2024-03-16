@@ -100,7 +100,7 @@ class MinifyMPIBase:
     def close_comm(self):
         resp = {'comm_type': 'exit'}
         self.comm.bcast(resp, root=self.ROOT)
-        self.comm.Disconnect()
+        # self.comm.Disconnect()
 
 
     def log(self, category, *msgs, color=None, ):
@@ -193,7 +193,7 @@ class MinifyMPI(MinifyMPIBase):
             resp = self.comm.bcast(None, root=self.ROOT)
             if resp['comm_type'] == 'exit':
                 #TODO 根据具体环境，检查是否运行Disconnect函数
-                self.comm.Disconnect()
+                # self.comm.Disconnect()
                 exit()
             else:
                 getattr(self, resp['comm_type']).__comm__(resp=resp)

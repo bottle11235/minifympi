@@ -15,7 +15,8 @@ def get_decorators(func):
     decs = {dec: re.findall('^\w+', dec)[0] for dec in decs}
     return decs
 
-def find_requires(func, g=None, ignores=None):
+
+def get_requires(func, gs=None, ignores=None):
     ''' 
     Find dependency libraries and functions for `func`.
 
@@ -25,12 +26,16 @@ def find_requires(func, g=None, ignores=None):
         Any function.
     '''
     ignores = ignores if ignores else ["__builtins__", "__file__"]
-    g = func.__globals__
-    requires = find_code_requires(func, g, ignores)
-    return {require: g[require] for require in requires if require in g}
+    gs = {} if gs is None else gs
+    if hasattr(func, '__globals__'):
+        gs.update(func.__globals__)
+    elif hasattr(func, '__wrapped__'):
+        gs.update(func.__wrapped__.__globals__)
+    requires = get_code_requires(func, gs, ignores)
+    return {require: gs[require] for require in requires if require in gs}
 
 
-def find_code_requires(func, g, ignores=None):
+def get_code_requires(func, gs, ignores=None):
     decs = get_decorators(func)
     requires = [
         name for name in func.__code__.co_names + tuple(set(decs.values()))
@@ -39,8 +44,8 @@ def find_code_requires(func, g, ignores=None):
         and hasattr(sys.modules['__main__'], name)
     ]
     for item in requires:
-        if item in g and isinstance(g[item], types.FunctionType) and g[item].__name__ != '<lambda>':
-            for key in find_requires(g[item], ignores=ignores + requires):
+        if item in gs and isinstance(gs[item], types.FunctionType) and gs[item].__name__ != '<lambda>':
+            for key in get_requires(gs[item], ignores=ignores + requires):
                 if key not in requires:
                     requires.append(key)
     return requires
@@ -51,14 +56,8 @@ def get_source_with_requires(func, gs=None, ignores=None, requires=None, ):
     创建依赖函数，包括引入相关的库和被调用的函数等。 值得注意的是，如果函数内部使用了全局变量，
     将会抛出一个存在风险的提示。
     '''
-    gs = dict() if gs is None else gs
-    if hasattr(func, '__globals__'):
-        func.__globals__.update(gs)
-    else:
-        func.__globals__ = gs
-    
     requires = dict() if requires is None else requires
-    requires.update(find_requires(func, ignores=ignores))
+    requires.update(get_requires(func, gs, ignores=ignores))
     code_import, code_func = [], []
     
     for key, value in requires.items():
@@ -90,16 +89,3 @@ def get_source_with_requires(func, gs=None, ignores=None, requires=None, ):
 
 
 __all__ = ['get_source_with_requires', 'get_decorators']
-
-# from numba import jit
-
-# def test1(func):
-#     return func
-
-# # @test1
-# @jit
-# def test2():
-#     print(2)
-
-
-# print(get_source_with_requires(test2, globals()))
