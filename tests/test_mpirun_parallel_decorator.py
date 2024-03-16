@@ -19,8 +19,8 @@ c = np.arange(20).reshape(10, -1)
 # Scatterv
 
 # print(a, b)
-import inspect
-print(inspect.getsource(test))
+# import inspect
+# print(inspect.getsource(test))
 res = test(a, b, c)
 print(res)
 

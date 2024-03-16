@@ -8,12 +8,12 @@ n_procs = 4
 
 @parallel(n_procs)
 @jit
-def test(a:'S', b, c:'Sv')->'g':
+def test(a:'S', b, c:'Sv')->'G':
     # c = np.arange(np.random.randint(1, 4, 1))
-    return a+b, b, c
+    return a+b
 
 a = np.arange(n_procs)
-b = np.arange(n_procs) * 5
+b = np.arange(n_procs*2) * 5
 c = np.arange(10)
 
 

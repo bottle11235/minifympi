@@ -88,7 +88,7 @@ class Parallel:
                 self.mmp.ls[meta['name']] = None
             comm_type = annts_return.get(key, meta['comm_type'])
             returns.append(getattr(self.mmp, comm_type)(meta['name'], storage='ls'))
-        return returns
+        return returns[0] if len(returns) == 1 else tuple(returns)
 
     def send_data(self, func, *args, **kwargs):
         sig = inspect.signature(func)  
@@ -124,9 +124,9 @@ class Parallel:
                 code_args = ', '.join((chain(*argument_code.values())))
                 code = f'mmp.ls["_returns_"] = {func.__code__.co_name}({code_args})'
                 self.mmp.exec(code)
-                all_returns = self.recv_data(func)
+                returns = self.recv_data(func)
                 self.mmp.close_comm()
-                return all_returns[0] if len(all_returns) == 0 else tuple(all_returns)
+                return returns
             return wrapper
         return decorator
         
