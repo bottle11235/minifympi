@@ -2,7 +2,6 @@ import numpy as np
 import sys, os
 import unittest
 
-from ..core.notebook import MinifyMPI
 from mpi4py import MPI
 
 # 指定是notebook模式还是mpirun模式

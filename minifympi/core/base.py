@@ -99,9 +99,13 @@ class MinifyMPIBase:
 
     def close_comm(self):
         resp = {'comm_type': 'exit'}
-        self.comm.bcast(resp, root=self.ROOT)
+        self.all_send(resp)
         # self.comm.Disconnect()
 
+    def all_send(self, resp):
+        for i in range(self.n_procs):
+            # self.log('all_send', resp)
+            self.comm.send(resp, dest=i)
 
     def log(self, category, *msgs, color=None, ):
         #TODO - 使用原生的logger
@@ -131,8 +135,8 @@ class MinifyMPIBase:
         for dec_code, dec in decs.items():
             if dec in alias:
                 code = re.sub(f'(\s*)(@{dec_code})', r'\1#\2', code)
-        self.log('parallel', '\n'+code)
-        self.log('parallel', ignores)
+        # self.log('parallel', '\n'+code)
+        # self.log('parallel', ignores)
 
 
         self.exec(code)
@@ -182,21 +186,42 @@ class MinifyMPIBase:
 
 
 class MinifyMPI(MinifyMPIBase):    
+    # def start_comm(self, gs=None):
+    #     self.gs = gs if gs is not None else {'mmp': self}
+    #     # self.assign_tasks()
+    #     self.comm = MPI.COMM_WORLD
+    #     if self.is_main:
+    #         return
+        
+    #     while True:
+    #         resp = self.comm.bcast(None, root=self.ROOT)
+    #         if resp['comm_type'] == 'exit':
+    #             #TODO 根据具体环境，检查是否运行Disconnect函数
+    #             # self.comm.Disconnect()
+    #             exit()
+    #         else:
+    #             getattr(self, resp['comm_type']).__comm__(resp=resp)
+
     def start_comm(self, gs=None):
         self.gs = gs if gs is not None else {'mmp': self}
-        # self.assign_tasks()
         self.comm = MPI.COMM_WORLD
         if self.is_main:
             return
         
         while True:
-            resp = self.comm.bcast(None, root=self.ROOT)
+            resp = self.comm.recv(source=self.ROOT)
+
             if resp['comm_type'] == 'exit':
-                #TODO 根据具体环境，检查是否运行Disconnect函数
+                # print('exit', resp)
+                # self.log('exit', self.gs)
+                # #TODO 根据具体环境，检查是否运行Disconnect函数
                 # self.comm.Disconnect()
                 exit()
             else:
+                # self.log('resp', resp)
                 getattr(self, resp['comm_type']).__comm__(resp=resp)
+
+
 
 
 class MPIFunction:
@@ -298,7 +323,9 @@ class MPICommBase:
 
 
     def __main__(self, resp, senddata=None, recvdata=None, **kwargs):
-        self.comm.bcast(resp, root=self.ROOT)
+        # self.comm.bcast(resp, root=self.ROOT)
+        # self.log('__main__', resp)
+        self.mmp.all_send(resp)
 
     def __comm__(self, senddata=None, recvdata=None, **kwargs):
         '''传输数据。所有进程都需要执行的通信代码。'''
@@ -340,7 +367,7 @@ class MPICommSetItem(MPICommBase):
         if isinstance(key, str):
             kwargs = {key:value}
         if isinstance(key, tuple):
-            kwargs = {ikey: ivalue for ikey, ivalue in zip(key, value)}
+            kwargs = {k: v for k, v in zip(key, value)}
         self.__call__(**kwargs)
     
     
@@ -359,6 +386,7 @@ class MPICommSetItem(MPICommBase):
 @MinifyMPI.register_comm_cls
 class MPIbcast(MPICommSetItem):
     def __comm__(self, resp=None, senddata=None, **kwargs):
+        # self.log('__comm__', resp)
         recvdata = self.comm.bcast(senddata, root=self.ROOT)
         self.__set_data__(resp['name'], recvdata, resp['storage'])
 
@@ -406,14 +434,15 @@ class MPIScatterv(MPICommSetItem):
     def __main__(self, resp, data, count=None, dspl=None):
         if count is None and dspl is None:
             task_count, count, displ = self.assign_tasks(data)
-        resp['task_count'] = task_count
-        resp['count'] = count
-        resp['displ'] = displ
-        self.comm.bcast(resp, root=self.ROOT)
+        resp['task_count'] = list(task_count)
+        resp['count'] = list(count)
+        resp['displ'] = list(displ)
+        self.mmp.all_send(resp)
 
 
     def __comm__(self, resp, senddata=None):
         pass
+        # self.log('__comm__', resp)
         shape = list(resp['shape'])
         shape[0] = resp['task_count'][self.mmp.rank]
         count = resp['count']
@@ -463,6 +492,7 @@ class MPICommGetItem(MPICommBase):
 @MinifyMPI.register_comm_cls
 class MPIgather(MPICommGetItem):
     def __comm__(self, resp=None):
+        # self.log('gather', resp)
         return self.comm.gather(getattr(self, resp['storage'])[resp['name']], root=self.ROOT)
 
 
@@ -471,7 +501,7 @@ class MPIGather(MPICommGetItem):
     def __main__(self, resp):
         # 发送元数据，包括shape、type、dtype
         resp['status'] = 'check_data'
-        self.comm.bcast(resp, root=self.ROOT)
+        self.mmp.all_send(resp)
         resps = self.comm.gather(resp, root=self.ROOT)
         if resps[0]['type'] == 'NoneType':
             resp.update(self.generate_resp(resp['name'], getattr(self, resp['storage'])[resp['name']], resp['storage']))
@@ -483,14 +513,14 @@ class MPIGather(MPICommGetItem):
         # resps包含了所有的metadata，如果metadata不是完全一样，
         # 报错并通知次进程停止Gather
         if not all([item == resp for item in resps]):
-            self.comm.bcast({'status': 'stop'}, root=self.ROOT)
+            self.mmp.all_send({'status': 'stop'})
             msg = 'Cannot Gather data for different metadata.\n'
             msg += '\n'.join([f'sub{i}: {meta}' for i, meta in enumerate(resps)])
             raise ValueError(msg)
         
         resp['shape'] = (resp['shape'][0]*self.mmp.n_procs,) + resp['shape'][1:]
         resp['status'] = 'continue'
-        self.comm.bcast(resp, root=self.ROOT)
+        self.mmp.all_send(resp)
     
 
     def __comm__(self, resp):
@@ -509,7 +539,7 @@ class MPIGather(MPICommGetItem):
 class MPIGatherv(MPICommGetItem):
     def __main__(self, resp):
         resp['status'] = 'check_data'
-        self.comm.bcast(resp, root=self.ROOT)
+        self.mmp.all_send(resp)
         resps = self.comm.gather(resp, root=self.ROOT)
         if resps[0]['type'] == 'NoneType':
             resp.update(self.generate_resp(resp['name'], getattr(self, resp['storage'])[resp['name']], resp['storage']))
@@ -530,7 +560,7 @@ class MPIGatherv(MPICommGetItem):
         resp['count'] = [np.prod(resp['shape']) for resp in resps]
         resp['shape'] = reduce(lambda x, y: (x[0]+y[0], *x[1:]), 
                        [resp['shape'] for resp in resps])
-        self.comm.bcast(resp, root=self.ROOT)
+        self.mmp.all_send(resp)
 
 
     def __comm__(self, resp=None, **kwargs):
@@ -545,4 +575,161 @@ class MPIGatherv(MPICommGetItem):
             self.comm.Gatherv(getattr(self, resp['storage'])[resp['name']], [recvdata, resp['count']], root=self.ROOT)
             return recvdata
         
+
+#SECTION - non-blocking communication
+#TODO 支持非阻塞通信
+#  下面的代码虽然是通过非阻塞通信函数来通信，但是使用了wait函数，因此不是非阻塞的。
+#  可以考虑通过异步来实现非阻塞通信，例如，发送数据时，isend之后直接结束，在接收端
+#  通过异步方法来判断是不是接收完成，接收完成后再将数据保存起来。
+class MPICommISetItem(MPICommBase):
+    def __setitem__(self, key, value):
+        if isinstance(key, tuple) and len(key)==2:
+            idxs, names = key
+        else:
+            raise KeyError(key)
+        
+        idxs = idxs,
+        names = names,
+        values = value,
+        self.__call__(idxs, names, values)
+    
+
+    def __call__(self, idxs=None, names=None, values=None, storage='gs', **kwargs: Any) -> types.NoneType:
+        for idx, name, value in zip(idxs, names, values):
+            if idx == 0 and self.is_root:
+                self.__set_data__(name, value, storage)
+                continue
+
+            resp = self.generate_resp(str(name), value, storage)
+            resp['dest'] = int(idx)
+            resp['source'] = 0
+            self.__main__(resp)
+            self.__comm__(resp, value)
+
+
+    def __set_data__(self, key, value, storage='gs'):
+        value = None if self.is_main and not self.is_root else value
+        getattr(self, storage)[key] = value
+
+    def __main__(self, resp, senddata=None, recvdata=None, **kwargs):
+        self.comm.send(resp, dest=resp['dest'])
+
+
+@MinifyMPI.register_comm_cls
+class MPIisend(MPICommISetItem):
+    def __comm__(self, resp, senddata=None, recvdata=None):
+        if self.mmp.rank == resp['dest']:
+            data = self.comm.irecv(source=resp['source']).wait()
+            self.__set_data__(resp['name'], data, resp['storage'])
+
+
+        elif self.mmp.rank == resp['source']:
+            self.comm.isend(senddata, resp['dest'])
+
+
+class MPICommIGetItem(MPICommBase):
+    def __getitem__(self, key):
+        if isinstance(key, tuple) and len(key)==2:
+            idxs, names = key
+        else:
+            raise KeyError(key)
+        idxs = idxs,
+        names = names,
+        return self.__call__(idxs, names)
+
+    def __call__(self, idxs=None, names=None, storage='gs', **kwargs: Any) -> types.NoneType:
+        returns = []
+        for idx, name in zip(idxs, names):
+            if idx == 0 and self.is_root:
+                data = getattr(self, storage)[name]
+            else:
+                resp = self.generate_resp(str(name), None, storage)
+                resp['dest'] = 0
+                resp['source'] = idx
+                self.__main__(resp)
+                data = self.__comm__(resp)
+            returns.append(data)
+        return returns[0] if len(returns) == 1 else returns
+
+    
+    def __main__(self, resp, senddata=None, recvdata=None, **kwargs):
+        self.comm.send(resp, dest=resp['source'])
+
+
+@MinifyMPI.register_comm_cls
+class MPIirecv(MPICommIGetItem):
+    def __comm__(self, resp, senddata=None, recvdata=None):
+        if self.mmp.rank == resp['dest']:
+            return self.comm.irecv(source=resp['source']).wait()
+
+        elif self.mmp.rank == resp['source']:
+            senddata = getattr(self, resp['storage'])[resp['name']]
+            self.comm.isend(senddata, resp['dest']).wait()
+
+
+@MinifyMPI.register_comm_cls
+class MPIiloc(MPICommSetItem):
+    def __setitem__(self, key, value):
+        if not isinstance(key, tuple):
+            raise KeyError(key)
+        idxs, names = np.array(key[0]), np.array(key[1])
+        idxs = idxs.reshape(1) if len(idxs.shape) == 0 else idxs
+        names = names.reshape(1) if len(names.shape) == 0 else names
+        
+        if isinstance(value, np.ndarray):
+            values = (value,)
+        if isinstance(value, int):
+            values = (value,)
+
+        if idxs.shape[0] == 1 and names.shape[0] > 1:
+            idxs = idxs.repeat(names.shape[0])
+        elif idxs.shape[0] > 1 and names.shape[0] == 1:
+            names = names.repeat(idxs.shape[0])
+        
+        self.__call__(idxs, names, values)            
+            
+    
+    def __call__(self, idxs=None, names=None, values=None, storage='gs', **kwargs: Any) -> types.NoneType:
+        for idx, name, value in zip(idxs, names, values):
+            if idx == 0 and self.is_root:
+                self.__set_data__(name, value, storage)
+
+            resp = self.generate_resp(str(name), value, storage)
+            resp['dest'] = int(idx)
+            resp['source'] = 0
+            self.__main__(resp)
+            # self.__comm__(resp, value)
+
+
+
+    def __main__(self, resp, senddata=None, recvdata=None, **kwargs):
+        self.log('__main__', resp)
+        self.comm.send(resp, dest=resp['dest'])
+
+
+    def __comm__(self, resp, senddata=None, recvdata=None):
+        self.log('__comm__', resp)
+
+        if self.is_main:
+            self.log('__comm__', resp)
+            if resp['type'] == 'ndarray':
+                self.comm.Isend(senddata, dest=resp['dest'])
+            else:
+                self.comm.isend(senddata, dest=resp['dest'])
+
+        else:
+            self.log('__comm__', resp)
+            if resp['type'] == 'ndarray':
+                recvdata = np.zeros(resp['shape'], resp['dtype'])
+                self.comm.Irecv(recvdata, source=resp['source'])
+            else:
+                pass
+                self.comm.irecv(recvdata, source=resp['source'])
+        
+        self.__set_data__(resp['name'], recvdata, resp['storage'])
+
+
+#!SECTION
+
+
 parallel = Parallel(MinifyMPI)

@@ -44,8 +44,11 @@ class MinifyMPI(MinifyMPIBase):
         
         self.comm = MPI.Comm.Get_parent()
         while True:
-            resp = self.comm.bcast(None, root=self.ROOT)
+            resp = self.comm.recv(source=self.ROOT)
+            # self.log('recv', resp)
+            # self.log('gs', self.gs)
             if resp['comm_type'] == 'exit':
+                # self.log('gs', self.gs)
                 self.comm.Disconnect()
                 exit()
             else:
