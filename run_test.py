@@ -1,4 +1,3 @@
-from minifympi.tests.test_send_recv import *
 import unittest
 
 from mpi4py import MPI
@@ -29,11 +28,15 @@ else:
 #SECTION - send
 # mmp = MinifyMPI(size if size > 1 else 4)
 # mmp.start_comm()
-# mmp.bcast['a'] = 1
+# mmp.send[2, 'a'] = 5
+# mmp.log('a', mmp.recv[2, 'a'])
 
+# mmp.exec('mmp.log("gs", mmp.gs.keys())')
 # mmp.close_comm()
 #!SECTION
 
 
 if __name__ == '__main__':
+    # from minifympi.tests.test_send_recv import *
+    from minifympi.tests.test_exec import *
     unittest.main()

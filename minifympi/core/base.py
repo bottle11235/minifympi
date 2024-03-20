@@ -732,4 +732,56 @@ class MPIiloc(MPICommSetItem):
 #!SECTION
 
 
+@MinifyMPI.register_comm_cls
+class MPIsend(MPICommISetItem):
+    def __comm__(self, resp, senddata=None, recvdata=None):
+        if self.mmp.rank == resp['dest']:
+            data = self.comm.recv(source=resp['source'])
+            self.__set_data__(resp['name'], data, resp['storage'])
+
+
+        elif self.mmp.rank == resp['source']:
+            self.comm.send(senddata, resp['dest'])
+
+
+@MinifyMPI.register_comm_cls
+class MPISend(MPICommISetItem):
+    def __comm__(self, resp, senddata=None, recvdata=None):
+        if self.mmp.rank == resp['dest']:
+            recvdata = np.zeros(resp['shape'], resp['dtype'])
+            self.comm.Recv(recvdata, source=resp['source'])
+            self.__set_data__(resp['name'], recvdata, resp['storage'])
+
+
+        elif self.mmp.rank == resp['source']:
+            self.comm.Send(senddata, resp['dest'])
+
+
+@MinifyMPI.register_comm_cls
+class MPIrecv(MPICommIGetItem):
+    def __comm__(self, resp, senddata=None, recvdata=None):
+        if self.mmp.rank == resp['dest']:
+            return self.comm.recv(source=resp['source'])
+
+        elif self.mmp.rank == resp['source']:
+            senddata = getattr(self, resp['storage'])[resp['name']]
+            self.comm.send(senddata, resp['dest'])
+
+
+@MinifyMPI.register_comm_cls
+class MPIRecv(MPICommIGetItem):
+    def __comm__(self, resp, senddata=None, recvdata=None):
+        if self.mmp.rank == resp['dest']:
+            resp0 = self.comm.recv(source=resp['source'])
+            recvdata = np.zeros(resp0['shape'], resp0['dtype'])
+            self.comm.Recv(recvdata, source=resp['source'])
+            return recvdata
+
+        elif self.mmp.rank == resp['source']:
+            resp0 = self.generate_resp(resp['name'], getattr(self, resp['storage'])[resp['name']], resp['storage'])
+            self.comm.send(resp0, dest=resp['dest'])
+            senddata = getattr(self, resp['storage'])[resp['name']]
+            self.comm.Send(senddata, resp['dest'])
+
+
 parallel = Parallel(MinifyMPI)

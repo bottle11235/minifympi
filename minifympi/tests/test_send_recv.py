@@ -1,16 +1,7 @@
 import numpy as np
 import sys, os
 import unittest
-
 from mpi4py import MPI
-
-# 指定是notebook模式还是mpirun模式
-# mode = 'mpirun' if len(sys.argv) == 1 else sys.argv[1]
-# if mode == 'mpirun':
-#     from ..core.base import MinifyMPI
-# elif mode == 'notebook':
-#     from ..core.notebook import MinifyMPI
-
 
 size = MPI.COMM_WORLD.size
 if size == 1:
@@ -18,6 +9,9 @@ if size == 1:
 else:
     from ..core.base import MinifyMPI
 
+'''
+本文件用于测试数据发送和接收。
+'''
 
 class TestSetItem(unittest.TestCase):
     @classmethod
@@ -78,4 +72,16 @@ class TestSetItem(unittest.TestCase):
         self.mmp.Bcast(storage='ls', data=data)
         recv_data = self.mmp.Gather('data', storage='ls')
         np.testing.assert_array_equal(recv_data, np.hstack([data]*self.n_procs))
+
+
+    def test_send_recv(self):
+        self.mmp.send[2, 'a'] = 5
+        self.assertEqual(5, self.mmp.recv[2, 'a'])
+
+    
+    def test_Send_Recv(self):
+        data = np.arange(3)
+        self.mmp.Send[1, 'a'] = data
+        np.testing.assert_array_equal(data, self.mmp.Recv[1, 'a'])
+
 
