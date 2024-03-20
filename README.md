@@ -160,17 +160,22 @@ assert res2 == [c]*n_procs
 
 
 # TODO
-- 介绍n_procs和n_tasks的概念
+计划实现：
+- 介绍n_procs的概念
 - 举例介绍每种传输方式
 - 介绍MinifyMPI类的使用，一种简单的通信方式，还有它的限制，目前只能实现阻塞通信，非阻塞看情况开发。
 - 将求和的例子改为1000个向量和1000种不同的旋转矩阵相乘的例子。
     这样的例子可以更好地表现并行带来的优势，也可以说明n_tasks和数据长度的关系。
 - 对读写文件的支持。目前还不支持。
-- 查找函数依赖，包括装饰器的
-- 优化MinifyMPI。将MinifyMPI拆分成两个类，一个是在notebook里用，一个是mpirun用。另外修改MinifyMPI的一些通信函数，将Scatter改为原来的Scatter，并提供Scatterv。
 - 写unittest，检查是否有bug，包括压力测试，检查大数据情况下，是否有bug 
-- 提供mpirun的parallel
+- 在并行函数内也能调用MinifyMPI的通信函数，而且是按照所在线程编号进行接收分发数据。
+- 提供一个with函数，可以安全地通信，而且可以设定_root参数。
+- 数据的解析。在调用__setitem__和__getitem__时，要解析是idxs、names、和values。
 
+已完成：
++ 查找函数依赖，包括装饰器的
++ 提供mpirun的parallel
++ 优化MinifyMPI。将MinifyMPI拆分成两个类，一个是在notebook里用，一个是mpirun用。另外修改MinifyMPI的一些通信函数，将Scatter改为原来的Scatter，并提供Scatterv。
 
 
 对于并行函数，我们有以下方案：

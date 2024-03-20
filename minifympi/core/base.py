@@ -368,6 +368,12 @@ class MPICommSetItem(MPICommBase):
             kwargs = {key:value}
         if isinstance(key, tuple):
             kwargs = {k: v for k, v in zip(key, value)}
+        # if isinstance(key, str):
+        #     names = key,
+        # if not isinstance(value, tuple):
+        #     values = value,
+        # self.log('__setitem__', names, values)
+
         self.__call__(**kwargs)
     
     
