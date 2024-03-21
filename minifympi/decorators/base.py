@@ -7,6 +7,7 @@ from ..utils.code import get_source_with_requires, get_decorators
 from functools import wraps, update_wrapper, reduce
 from itertools import chain
 from textwrap import dedent
+import types
 
 #TODO
 # - 检查返回元组与函数注解的长度
@@ -88,6 +89,7 @@ class Parallel:
             returns.append(getattr(self.mmp, comm_type)(meta['name'], storage='ls'))
         return returns[0] if len(returns) == 1 else tuple(returns)
 
+
     def send_data(self, func, *args, **kwargs):
         sig = inspect.signature(func)  
         _bound = sig.bind(*args, **kwargs)
@@ -112,11 +114,12 @@ class Parallel:
         return arguments
     
     
-    def __call__(self, n_procs=None, gs=None, ignores=None, requires=None):
+    def __call__(self, *args, n_procs=None, gs=None, ignores=None, requires=None):        
         def decorator(func):
             @wraps(func)
             def wrapper(*args, **kwargs):
-                self.mmp.n_procs = n_procs
+                if isinstance(n_procs, int):
+                    self.mmp.n_procs = n_procs
                 self.mmp.start_comm()
                 self.register_func(func, gs, ignores, requires)
                 argument_code = self.send_data(func, *args, **kwargs)
@@ -127,9 +130,10 @@ class Parallel:
                 self.mmp.close_comm()
                 return returns
             return wrapper
-        return decorator
         
-
-
+        if len(args) == 1 and isinstance(args[0], types.FunctionType):
+            return decorator(args[0])
+        else:
+            return decorator
 
 

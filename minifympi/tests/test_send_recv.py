@@ -7,7 +7,7 @@ size = MPI.COMM_WORLD.size
 if size == 1:
     from ..core.notebook import MinifyMPI
 else:
-    from ..core.base import MinifyMPI
+    from ..core.mpirun import MinifyMPI
 
 '''
 本文件用于测试数据发送和接收。
@@ -16,13 +16,16 @@ else:
 class TestSetItem(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.mmp = MinifyMPI(size if size > 1 else 4)
+        cls.mmp = MinifyMPI()
+        if size == 1:
+            cls.mmp.n_procs = 4
         cls.mmp.start_comm()
 
 
     @classmethod
     def tearDownClass(cls):
-        cls.mmp.close_comm()
+        if size == 1:
+            cls.mmp.close_comm()
 
 
     @property

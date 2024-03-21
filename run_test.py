@@ -4,10 +4,11 @@ from mpi4py import MPI
 
 
 size = MPI.COMM_WORLD.size
+rank = MPI.COMM_WORLD.rank
 if size == 1:
     from minifympi.core.notebook import MinifyMPI
 else:
-    from minifympi.core.base import MinifyMPI
+    from minifympi.core.mpirun import MinifyMPI
 
 #SECTION - non-blocking
 # mmp = MinifyMPI(size if size > 1 else 4)
@@ -37,6 +38,11 @@ else:
 
 
 if __name__ == '__main__':
-    # from minifympi.tests.test_send_recv import *
+    from minifympi.tests.test_send_recv import *
     from minifympi.tests.test_exec import *
     unittest.main()
+
+    if size != 1 and rank==0:
+        mmp = MinifyMPI()
+        mmp.start_comm()
+        mmp.close_comm()

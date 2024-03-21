@@ -20,7 +20,6 @@ from ..utils.code import get_source_with_requires, get_decorators
 # from rich.theme import Theme
 from itertools import chain
 from functools import reduce
-from .decorators import Parallel
 import uuid
 
 #TODO
@@ -44,14 +43,10 @@ class MMPOptions:
 class MinifyMPIBase:
     comm_cls = []
 
-    def __init__(self, n_procs=2, n_tasks=2) -> None:
+    def __init__(self, *args, **kwargs) -> None:
 
         #TODO 优化MinifyMPIBase
         #- n_procs如果是None，则根据comm.size来推断。
-        #- n_tasks似乎并不需要。
-        self.n_procs = n_procs
-        self.n_tasks = n_tasks
-
         self.comm = None
         self.comm_world = MPI.COMM_WORLD
         self.options = MMPOptions()
@@ -65,6 +60,10 @@ class MinifyMPIBase:
     @property
     def rank(self):
         return self.comm.rank
+
+    @property
+    def n_procs(self):
+        return self.comm.size
 
     @property
     def is_main(self):
@@ -185,45 +184,6 @@ class MinifyMPIBase:
             return vars
 
 
-class MinifyMPI(MinifyMPIBase):    
-    # def start_comm(self, gs=None):
-    #     self.gs = gs if gs is not None else {'mmp': self}
-    #     # self.assign_tasks()
-    #     self.comm = MPI.COMM_WORLD
-    #     if self.is_main:
-    #         return
-        
-    #     while True:
-    #         resp = self.comm.bcast(None, root=self.ROOT)
-    #         if resp['comm_type'] == 'exit':
-    #             #TODO 根据具体环境，检查是否运行Disconnect函数
-    #             # self.comm.Disconnect()
-    #             exit()
-    #         else:
-    #             getattr(self, resp['comm_type']).__comm__(resp=resp)
-
-    def start_comm(self, gs=None):
-        self.gs = gs if gs is not None else {'mmp': self}
-        self.comm = MPI.COMM_WORLD
-        if self.is_main:
-            return
-        
-        while True:
-            resp = self.comm.recv(source=self.ROOT)
-
-            if resp['comm_type'] == 'exit':
-                # print('exit', resp)
-                # self.log('exit', self.gs)
-                # #TODO 根据具体环境，检查是否运行Disconnect函数
-                # self.comm.Disconnect()
-                exit()
-            else:
-                # self.log('resp', resp)
-                getattr(self, resp['comm_type']).__comm__(resp=resp)
-
-
-
-
 class MPIFunction:
     def __init__(self, mmp, func):
         self.mmp = mmp
@@ -331,7 +291,7 @@ class MPICommBase:
         '''传输数据。所有进程都需要执行的通信代码。'''
 
 
-@MinifyMPI.register_comm_cls
+@MinifyMPIBase.register_comm_cls
 class MPIexec(MPICommBase):
     def __call__(self, code, *args: Any, **kwargs: Any) -> Any:
         resp = {'comm_type': 'exec', 'code': code}
@@ -389,7 +349,7 @@ class MPICommSetItem(MPICommBase):
         getattr(self, storage)[key] = value
 
 
-@MinifyMPI.register_comm_cls
+@MinifyMPIBase.register_comm_cls
 class MPIbcast(MPICommSetItem):
     def __comm__(self, resp=None, senddata=None, **kwargs):
         # self.log('__comm__', resp)
@@ -397,7 +357,7 @@ class MPIbcast(MPICommSetItem):
         self.__set_data__(resp['name'], recvdata, resp['storage'])
 
 
-@MinifyMPI.register_comm_cls
+@MinifyMPIBase.register_comm_cls
 class MPIBcast(MPICommSetItem):
     def __comm__(self, resp=None, senddata=None, storage='gs'):
         senddata = np.zeros(resp['shape'], resp['dtype']) if senddata is None else senddata
@@ -405,14 +365,14 @@ class MPIBcast(MPICommSetItem):
         self.__set_data__(resp['name'], senddata, resp['storage'])
 
 
-@MinifyMPI.register_comm_cls
+@MinifyMPIBase.register_comm_cls
 class MPIscatter(MPICommSetItem):
     def __comm__(self, resp=None, senddata=None, storage='gs'):
         recvdata = self.comm.scatter(senddata, root=self.ROOT)
         self.__set_data__(resp['name'], recvdata, resp['storage'])
 
 
-@MinifyMPI.register_comm_cls
+@MinifyMPIBase.register_comm_cls
 class MPIScatter(MPICommSetItem):
     def __comm__(self, resp=None, senddata=None, storage='gs'):
         recvdata = np.zeros((resp['shape'][0]//self.mmp.n_procs,)+resp['shape'][1:], resp['dtype'])
@@ -420,7 +380,7 @@ class MPIScatter(MPICommSetItem):
         self.__set_data__(resp['name'], recvdata, resp['storage'])
 
 
-@MinifyMPI.register_comm_cls
+@MinifyMPIBase.register_comm_cls
 class MPIScatterv(MPICommSetItem):
     #TODO Scatterv 优化 
     # - 数据类型检查
@@ -495,14 +455,14 @@ class MPICommGetItem(MPICommBase):
         return returns[0] if len(returns) == 1 else returns
 
 
-@MinifyMPI.register_comm_cls
+@MinifyMPIBase.register_comm_cls
 class MPIgather(MPICommGetItem):
     def __comm__(self, resp=None):
         # self.log('gather', resp)
         return self.comm.gather(getattr(self, resp['storage'])[resp['name']], root=self.ROOT)
 
 
-@MinifyMPI.register_comm_cls
+@MinifyMPIBase.register_comm_cls
 class MPIGather(MPICommGetItem):
     def __main__(self, resp):
         # 发送元数据，包括shape、type、dtype
@@ -541,7 +501,7 @@ class MPIGather(MPICommGetItem):
             return recvdata
 
 
-@MinifyMPI.register_comm_cls
+@MinifyMPIBase.register_comm_cls
 class MPIGatherv(MPICommGetItem):
     def __main__(self, resp):
         resp['status'] = 'check_data'
@@ -621,7 +581,7 @@ class MPICommISetItem(MPICommBase):
         self.comm.send(resp, dest=resp['dest'])
 
 
-@MinifyMPI.register_comm_cls
+@MinifyMPIBase.register_comm_cls
 class MPIisend(MPICommISetItem):
     def __comm__(self, resp, senddata=None, recvdata=None):
         if self.mmp.rank == resp['dest']:
@@ -662,7 +622,7 @@ class MPICommIGetItem(MPICommBase):
         self.comm.send(resp, dest=resp['source'])
 
 
-@MinifyMPI.register_comm_cls
+@MinifyMPIBase.register_comm_cls
 class MPIirecv(MPICommIGetItem):
     def __comm__(self, resp, senddata=None, recvdata=None):
         if self.mmp.rank == resp['dest']:
@@ -673,7 +633,7 @@ class MPIirecv(MPICommIGetItem):
             self.comm.isend(senddata, resp['dest']).wait()
 
 
-@MinifyMPI.register_comm_cls
+@MinifyMPIBase.register_comm_cls
 class MPIiloc(MPICommSetItem):
     def __setitem__(self, key, value):
         if not isinstance(key, tuple):
@@ -738,7 +698,7 @@ class MPIiloc(MPICommSetItem):
 #!SECTION
 
 
-@MinifyMPI.register_comm_cls
+@MinifyMPIBase.register_comm_cls
 class MPIsend(MPICommISetItem):
     def __comm__(self, resp, senddata=None, recvdata=None):
         if self.mmp.rank == resp['dest']:
@@ -750,7 +710,7 @@ class MPIsend(MPICommISetItem):
             self.comm.send(senddata, resp['dest'])
 
 
-@MinifyMPI.register_comm_cls
+@MinifyMPIBase.register_comm_cls
 class MPISend(MPICommISetItem):
     def __comm__(self, resp, senddata=None, recvdata=None):
         if self.mmp.rank == resp['dest']:
@@ -763,7 +723,7 @@ class MPISend(MPICommISetItem):
             self.comm.Send(senddata, resp['dest'])
 
 
-@MinifyMPI.register_comm_cls
+@MinifyMPIBase.register_comm_cls
 class MPIrecv(MPICommIGetItem):
     def __comm__(self, resp, senddata=None, recvdata=None):
         if self.mmp.rank == resp['dest']:
@@ -774,7 +734,7 @@ class MPIrecv(MPICommIGetItem):
             self.comm.send(senddata, resp['dest'])
 
 
-@MinifyMPI.register_comm_cls
+@MinifyMPIBase.register_comm_cls
 class MPIRecv(MPICommIGetItem):
     def __comm__(self, resp, senddata=None, recvdata=None):
         if self.mmp.rank == resp['dest']:
@@ -789,5 +749,3 @@ class MPIRecv(MPICommIGetItem):
             senddata = getattr(self, resp['storage'])[resp['name']]
             self.comm.Send(senddata, resp['dest'])
 
-
-parallel = Parallel(MinifyMPI)

@@ -1,9 +1,22 @@
 from .base import MinifyMPIBase
-from .decorators import Parallel
 from mpi4py import MPI
-import sys
+import sys, os
 
 class MinifyMPI(MinifyMPIBase):    
+    def __init__(self, n_procs=None) -> None:
+        self._n_procs = n_procs
+        super().__init__()
+
+    @property
+    def n_procs(self):
+        return self._n_procs
+    
+    @n_procs.setter
+    def n_procs(self, value):
+        if not isinstance(value, int):
+            raise TypeError(f'`n_procs` can only be an integer, but `{type(value).__name__}` was given')
+        self._n_procs = value
+
     @property
     def is_main(self):
         return self.comm.Get_parent() == MPI.COMM_NULL
@@ -27,13 +40,14 @@ class MinifyMPI(MinifyMPIBase):
         # 开发完成就去掉临时库的部分
         code = [
             'import sys, os',
-            'sys.path.append("/mnt/d/Python/minifympi/")',
+            'sys.path.append(__file__.split("minifympi/core")[0])',
             'from minifympi.core.notebook import MinifyMPI',
-            f'mmp = MinifyMPI({self.n_procs}, {self.n_tasks})',
+            f'mmp = MinifyMPI({self.n_procs})',
             'mmp.start_comm()',
         ]
+        
         code = '\n'.join(code)
-        fpath = '/mnt/d/Python/minifympi/tmp_subprocss.py'
+        fpath = f'{os.path.dirname(__file__)}/tmp_subprocss.py'
         with open(fpath, 'w') as f:
             f.write(code)
 
@@ -53,5 +67,3 @@ class MinifyMPI(MinifyMPIBase):
                 exit()
             else:
                 getattr(self, resp['comm_type']).__comm__(resp=resp)
-
-parallel = Parallel(MinifyMPI)
