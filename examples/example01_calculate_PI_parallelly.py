@@ -4,10 +4,7 @@ import sys, os
 from mpi4py import MPI
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-
-
 comm = MPI.COMM_WORLD
-
 if comm.size == 1:
     from minifympi.decorators.notebook import parallel
 else:
@@ -24,9 +21,10 @@ def generate_data(num_samples):
 def monte_carlo_pi(data:"Sv") -> 'g':
     return 4*sum((data**2).sum(axis=1) < 1)
 
+
 if __name__ == "__main__":
-    n_tasks = int(1024*1024*1024/512/2)
-    data = generate_data(n_tasks) if MPI.COMM_WORLD.rank == 0 else None
+    n_tasks = int(1024*1024*1024/8/2)
+    data = generate_data(n_tasks)
     time_start =  time.perf_counter()
     res = monte_carlo_pi(data)
     print(res)

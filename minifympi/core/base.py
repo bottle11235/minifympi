@@ -283,8 +283,6 @@ class MPICommBase:
 
 
     def __main__(self, resp, senddata=None, recvdata=None, **kwargs):
-        # self.comm.bcast(resp, root=self.ROOT)
-        # self.log('__main__', resp)
         self.mmp.all_send(resp)
 
     def __comm__(self, senddata=None, recvdata=None, **kwargs):
@@ -333,7 +331,6 @@ class MPICommSetItem(MPICommBase):
         # if not isinstance(value, tuple):
         #     values = value,
         # self.log('__setitem__', names, values)
-
         self.__call__(**kwargs)
     
     
@@ -352,7 +349,6 @@ class MPICommSetItem(MPICommBase):
 @MinifyMPIBase.register_comm_cls
 class MPIbcast(MPICommSetItem):
     def __comm__(self, resp=None, senddata=None, **kwargs):
-        # self.log('__comm__', resp)
         recvdata = self.comm.bcast(senddata, root=self.ROOT)
         self.__set_data__(resp['name'], recvdata, resp['storage'])
 
@@ -408,7 +404,6 @@ class MPIScatterv(MPICommSetItem):
 
     def __comm__(self, resp, senddata=None):
         pass
-        # self.log('__comm__', resp)
         shape = list(resp['shape'])
         shape[0] = resp['task_count'][self.mmp.rank]
         count = resp['count']
@@ -458,7 +453,6 @@ class MPICommGetItem(MPICommBase):
 @MinifyMPIBase.register_comm_cls
 class MPIgather(MPICommGetItem):
     def __comm__(self, resp=None):
-        # self.log('gather', resp)
         return self.comm.gather(getattr(self, resp['storage'])[resp['name']], root=self.ROOT)
 
 
@@ -536,14 +530,13 @@ class MPIGatherv(MPICommGetItem):
             self.comm.gather(resp, root=self.ROOT)
         
         elif resp['status'] == 'continue':
-            # self.log('Gatherv resp', resp)
             recvdata = np.zeros(resp['shape'], resp['dtype']) if self.is_main else None
             self.comm.Gatherv(getattr(self, resp['storage'])[resp['name']], [recvdata, resp['count']], root=self.ROOT)
             return recvdata
         
 
 #SECTION - non-blocking communication
-#TODO 支持非阻塞通信
+#TODO 支持非阻塞通信（还在开发中，请勿使用）
 #  下面的代码虽然是通过非阻塞通信函数来通信，但是使用了wait函数，因此不是非阻塞的。
 #  可以考虑通过异步来实现非阻塞通信，例如，发送数据时，isend之后直接结束，在接收端
 #  通过异步方法来判断是不是接收完成，接收完成后再将数据保存起来。
